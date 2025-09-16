@@ -21,6 +21,7 @@ pub var tormenter_base: sg.Image = undefined;
 pub var tormenter_eye: sg.Image = undefined;
 pub var tormenter_eye_broken: sg.Image = undefined;
 pub var tormenter_laser: sg.Image = undefined;
+pub var tormenter_bullet: sg.Image = undefined;
 
 pub fn loadAssets() void {
     ship = loadImage(root ++ "ship.png", .{ .width = 16, .height = 24 });
@@ -31,4 +32,5 @@ pub fn loadAssets() void {
     tormenter_eye = loadImage(root ++ "tormenter_eye.png", .{ .width = 102, .height = 48 });
     tormenter_eye_broken = loadImage(root ++ "tormenter_eye_broken.png", .{ .width = 102, .height = 48 });
     tormenter_laser = loadImage(root ++ "tormenter_laser.png", .{ .width = 8, .height = 1 });
+    tormenter_bullet = loadImage(root ++ "tormenter_bullet.png", .{ .width = 16, .height = 16 });
 }

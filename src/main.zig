@@ -151,21 +151,45 @@ const Alien = struct {
                 if (tormenter.laser_cooldown <= 0) {
                     var num_shooting: f32 = 0;
                     for (tormenter.eye_actors, tormenter.eye_shooting) |eye, shooting| {
-                        if (!shooting) continue;
-                        num_shooting += 1;
-                        state.game.hazards.append(.{
-                            .specific = .{ .tormenter_laser = .{} },
-                            .actor = .{
-                                .size = zlm.vec2(eye.size.x, 600),
-                                .pos = eye.pos,
-                                .sprite = assets.tormenter_laser,
-                                .vel = zlm.vec2(0, 0),
-                                .drag = 1,
-                                .z = 0.8,
-                            },
-                            .damage = 1,
-                            .friendly = false,
-                        }) catch @panic("failed to add laser to hazards");
+                        if (eye.sprite.id == assets.tormenter_eye.id) {
+                            if (!shooting) continue;
+                            num_shooting += 1;
+                            state.game.hazards.append(.{
+                                .specific = .{ .tormenter_laser = .{} },
+                                .actor = .{
+                                    .size = zlm.vec2(eye.size.x, 600),
+                                    .pos = eye.pos,
+                                    .sprite = assets.tormenter_laser,
+                                    .vel = zlm.vec2(0, 0),
+                                    .drag = 1,
+                                    .z = 0.8,
+                                },
+                                .damage = 1,
+                                .friendly = false,
+                            }) catch @panic("failed to add laser to hazards");
+                        } else if (eye.sprite.id == assets.tormenter_eye_broken.id) {
+                            const rand = state.rand.random();
+                            for (1..5) |i| {
+                                state.game.hazards.append(.{
+                                    .specific = .{
+                                        .tormenter_bullet = .{
+                                            .accel = rand.float(f32) * 3000 + 4000,
+                                            .home_for = 0.30,
+                                        },
+                                    },
+                                    .actor = .{
+                                        .size = zlm.vec2(16, 16),
+                                        .pos = eye.pos,
+                                        .sprite = assets.tormenter_bullet,
+                                        .vel = zlm.vec2(rand.float(f32) * 10 + @as(f32, @floatFromInt(i)) * 100, 250 + rand.float(f32) * 50),
+                                        .drag = 0.9,
+                                        .z = 0.8,
+                                    },
+                                    .damage = 1,
+                                    .friendly = false,
+                                }) catch @panic("failed to add laser to hazards");
+                            }
+                        }
                     }
                     tormenter.laser_cooldown = 5;
                     tormenter.eye_shooting = [_]bool{ false, false, false };
@@ -255,6 +279,7 @@ const Alien = struct {
 const HazardType = enum {
     bullet,
     tormenter_laser,
+    tormenter_bullet,
 };
 
 const HazardSpecific = union(HazardType) {
@@ -262,7 +287,17 @@ const HazardSpecific = union(HazardType) {
     tormenter_laser: struct {
         lifetime: f32 = 2,
     },
+    tormenter_bullet: struct {
+        alive_for: f32 = 0,
+        home_for: f32,
+        accel: f32,
+        angle: f32 = undefined,
+    },
 };
+
+pub fn getAngle(vec: Vec2) f32 {
+    return std.math.acos(vec.normalize().x);
+}
 
 const Hazard = struct {
     specific: HazardSpecific,
@@ -274,18 +309,37 @@ const Hazard = struct {
         self: *@This(),
         dt: f32,
     ) struct { remove_self: bool } {
+        const is_offscreen = self.actor.pos.x > 800 or self.actor.pos.x + self.actor.size.x < 0 or self.actor.pos.y + self.actor.size.y < 0 or self.actor.pos.y > 600;
         switch (self.specific) {
             .bullet => {
                 self.actor.update(dt);
-                return .{
-                    .remove_self = self.actor.pos.x > 800 or self.actor.pos.x + self.actor.size.x < 0 or self.actor.pos.y + self.actor.size.y < 0 or self.actor.pos.y > 600,
-                };
+                return .{ .remove_self = is_offscreen };
             },
             .tormenter_laser => |*laser| {
                 laser.lifetime -= dt;
                 if (laser.lifetime < 0) {
                     return .{ .remove_self = true };
                 }
+            },
+            // TODO FIX
+            .tormenter_bullet => |*bullet| {
+                const first_home = bullet.alive_for <= 0.75;
+                bullet.alive_for += dt;
+                if (bullet.alive_for > 0.75) {
+                    if (first_home) self.actor.vel = zlm.Vec2.unitY;
+                    const len = self.actor.vel.length();
+                    self.actor.vel.y += bullet.accel * dt * 0.5;
+                    if (bullet.alive_for < 0.75 + bullet.home_for) {
+                        const ship_actor = state.game.ship.actor;
+
+                        const target_angle = -std.math.atan2(self.actor.pos.y - ship_actor.pos.y, self.actor.pos.x - ship_actor.pos.x);
+                        if (target_angle - bullet.angle < 0) bullet.angle -= 5 * dt else bullet.angle += 5 * dt;
+                    }
+
+                    self.actor.vel = zlm.Vec2.unitX.rotate(bullet.angle).scale(len + bullet.accel * dt);
+                }
+                self.actor.update(dt);
+                return .{ .remove_self = is_offscreen };
             },
         }
 
@@ -384,6 +438,7 @@ fn spawnTormenter() void {
             },
         } },
     }) catch @panic("failed to add tormenter");
+    state.game.tormenter = .alive;
 }
 
 export fn init() void {
@@ -498,10 +553,7 @@ export fn frame() void {
         sg.applyUniforms(.VS, 0, sg.asRange(&.{ x / 800, y / 600 }));
     }
 
-    if (state.game.score >= 4800 and state.game.tormenter == .unspawned) {
-        spawnTormenter();
-        state.game.tormenter = .alive;
-    }
+    if (state.game.score >= 4800 and state.game.tormenter == .unspawned) spawnTormenter();
     // update ship
     var ship_actor = &state.game.ship.actor;
     const accel = state.game.ship.accel;
@@ -608,6 +660,7 @@ export fn input(ev: ?*const sapp.Event) void {
             .A, .LEFT => state.input.left = key_pressed,
             .D, .RIGHT => state.input.right = key_pressed,
             .SPACE => state.input.shoot = key_pressed,
+            .L => if (key_pressed) spawnTormenter(),
             // .ESCAPE => state.input.esc = key_pressed,
             else => {},
         }
@@ -620,7 +673,6 @@ export fn cleanup() void {
 }
 
 pub fn main() !void {
-    _ = std.debug.print("{any}", .{hex("#ffffff")});
     zstbi.init(gpa.allocator());
     zstbi.setFlipVerticallyOnLoad(true);
 
